@@ -10,7 +10,7 @@ header('Content-Type: application/json');
 try {
     Auth::requireLogin();
     $userId = Auth::getUserId();
-} catch (Exception $e) {
+} catch (Throwable $e) {
     http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
     exit;
@@ -25,14 +25,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 // Get request data
 $data = json_decode(file_get_contents('php://input'), true);
 
-$sourceCode = $data['source_code'] ?? '';
-$languageId = $data['language_id'] ?? null;
-$problemId = $data['problem_id'] ?? null;
-$customInput = $data['custom_input'] ?? '';
-$action = $data['action'] ?? 'run';  // 'run' or 'submit'
+$sourceCode = (string)($data['source_code'] ?? '');
+$languageId = isset($data['language_id']) ? (int)$data['language_id'] : 0;
+$problemId = isset($data['problem_id']) ? (int)$data['problem_id'] : 0;
+$customInput = (string)($data['custom_input'] ?? '');
+$action = strtolower((string)($data['action'] ?? 'run'));  // 'run', 'submit', 'ai_verify'
+$redirectTo = (string)($data['redirect_to'] ?? '');
 
 // Validate inputs
-if (empty($sourceCode) || empty($languageId)) {
+if (trim($sourceCode) === '' || $languageId <= 0) {
     echo json_encode(['success' => false, 'message' => 'Missing required fields']);
     exit;
 }
@@ -45,6 +46,17 @@ try {
         // Run code with custom input (no submission tracking)
         $input = !empty($customInput) ? $customInput : '';
         $result = $compiler->executeCode($sourceCode, $languageId, $input);
+
+        if (empty($result['success'])) {
+            echo json_encode([
+                'success' => false,
+                'status' => $result['status'] ?? 'error',
+                'message' => $result['message'] ?? 'Execution failed',
+                'stderr' => $result['stderr'] ?? '',
+                'compile_output' => $result['compile_output'] ?? ''
+            ]);
+            exit;
+        }
         
         echo json_encode([
             'success' => true,
@@ -56,9 +68,29 @@ try {
             'memory' => $result['memory'] ?? 0
         ]);
         
-    } elseif ($action === 'submit' && $problemId) {
+    } elseif ($action === 'submit') {
         // Submit solution - run against all test cases and track submission
+        if ($problemId <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Missing problem ID for submission']);
+            exit;
+        }
         $result = $compiler->submitSolution($userId, $problemId, $languageId, $sourceCode);
+
+        if (empty($result['success'])) {
+            echo json_encode([
+                'success' => false,
+                'message' => $result['message'] ?? 'Submission failed'
+            ]);
+            exit;
+        }
+        
+        // If solution is accepted, clear focus violations (Reward)
+        if (isset($result['status']) && strtolower($result['status']) === 'accepted') {
+            require_once __DIR__ . '/../classes/FocusMode.php';
+            $focusMode = new FocusMode();
+            $clearResult = $focusMode->clearCurrentSessionViolations($userId);
+            $result['violations_cleared'] = $clearResult['success'];
+        }
         
         // Record submission in database
         $submissionData = [
@@ -78,10 +110,35 @@ try {
             $result['status'] ?? 'pending',
             $submissionData
         );
-        
+
+        if (!$submissionId) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'Submission evaluated but failed to save to database'
+            ]);
+            exit;
+        }
+
         // Add submission ID to response
         $result['submission_id'] = $submissionId;
+        $result['redirect_to'] = trim($redirectTo) !== '' ? $redirectTo : 'problems.php';
         
+        echo json_encode($result);
+        
+    } elseif ($action === 'ai_verify') {
+        // AI Verification (Generate random input & verify)
+        if ($problemId <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Missing problem ID for verification']);
+            exit;
+        }
+        
+        $result = $compiler->verifySolutionWithAI($sourceCode, $languageId, $problemId);
+        
+        if (!is_array($result)) {
+            echo json_encode(['success' => false, 'message' => 'AI verification service unavailable']);
+            exit;
+        }
+
         echo json_encode($result);
         
     } else {

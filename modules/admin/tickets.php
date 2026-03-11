@@ -3,17 +3,7 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../classes/Auth.php';
 require_once __DIR__ . '/../../classes/Support.php';
 
-Auth::requireLogin();
-
-// Check if user is admin
-$userId = Auth::getUserId();
-$db = Database::getInstance();
-$userRole = $db->fetchOne("SELECT role_id FROM users WHERE user_id = :uid", ['uid' => $userId])['role_id'];
-
-if ($userRole != 2) {
-    header('Location: ../../modules/dashboard/index.php');
-    exit();
-}
+Auth::requireAdmin();
 
 // Handle status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_ticket'])) {

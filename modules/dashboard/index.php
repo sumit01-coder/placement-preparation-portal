@@ -163,6 +163,10 @@ include __DIR__ . '/../../includes/navbar.php';
                     <span>Take Aptitude Test</span>
                     <span style="color: #ffa116;">→</span>
                 </a>
+                <a href="../companies/list.php" class="submission-item" style="text-decoration: none; color: inherit;">
+                    <span>Company Drives</span>
+                    <span style="color: #ffa116;">→</span>
+                </a>
                 <a href="../community/index.php" class="submission-item" style="text-decoration: none; color: inherit;">
                     <span>Community Q&A</span>
                     <span style="color: #ffa116;">→</span>
@@ -188,3 +192,5 @@ include __DIR__ . '/../../includes/navbar.php';
 </div>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
+
+

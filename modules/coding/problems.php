@@ -3,58 +3,124 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../classes/Auth.php';
 
 Auth::requireLogin();
-$userId = Auth::getUserId();
+
+$userId = (int)Auth::getUserId();
 $db = Database::getInstance();
+$submissionTable = $db->firstExistingTable(['coding_submissions', 'submissions']);
 
-// Get filters
-$difficulty = $_GET['difficulty'] ?? '';
-$search = $_GET['search'] ?? '';
+$allowedDifficulties = ['easy', 'medium', 'hard'];
+$difficulty = strtolower(trim((string)($_GET['difficulty'] ?? '')));
+if (!in_array($difficulty, $allowedDifficulties, true)) {
+    $difficulty = '';
+}
+
+$search = trim((string)($_GET['search'] ?? ''));
+if (strlen($search) > 100) {
+    $search = substr($search, 0, 100);
+}
+
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$limit = 20;
-$offset = ($page - 1) * $limit;
+if ($page < 1) {
+    $page = 1;
+}
 
-// Build WHERE clause
-$whereClause = "WHERE 1=1";
+$limit = 20;
+$whereClause = " WHERE 1=1";
 $params = [];
 
-if ($difficulty) {
-    $whereClause .= " AND p.difficulty = :difficulty";
+if ($difficulty !== '') {
+    $whereClause .= " AND LOWER(p.difficulty) = :difficulty";
     $params['difficulty'] = $difficulty;
 }
 
-if ($search) {
+if ($search !== '') {
     $whereClause .= " AND (p.title LIKE :search OR p.description LIKE :search)";
     $params['search'] = '%' . $search . '%';
 }
 
-// Get total count
-$countQuery = "SELECT COUNT(*) as total FROM coding_problems p $whereClause";
-$totalResult = $db->fetchOne($countQuery, $params);
-$totalProblems = $totalResult['total'];
-$totalPages = ceil($totalProblems / $limit);
+$countQuery = "SELECT COUNT(*) AS total FROM coding_problems p {$whereClause}";
+$totalProblems = (int)($db->fetchOne($countQuery, $params)['total'] ?? 0);
+$totalPages = max(1, (int)ceil($totalProblems / $limit));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $limit;
 
-// Get problems
-$query = "SELECT p.*, 
-          COUNT(DISTINCT s.submission_id) as total_submissions,
-          SUM(CASE WHEN s.status = 'accepted' THEN 1 ELSE 0 END) as accepted_count,
-          ROUND(SUM(CASE WHEN s.status = 'accepted' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(s.submission_id), 0), 1) as acceptance_rate,
-          (SELECT COUNT(*) FROM submissions WHERE user_id = :user_id1 AND problem_id = p.problem_id AND status = 'accepted') as user_solved,
-          (SELECT COUNT(*) FROM submissions WHERE user_id = :user_id2 AND problem_id = p.problem_id AND status != 'accepted') as user_attempted
-          FROM coding_problems p
-          LEFT JOIN submissions s ON p.problem_id = s.problem_id
-          $whereClause
-          GROUP BY p.problem_id
-          ORDER BY p.problem_id ASC
-          LIMIT $limit OFFSET $offset";
+$query = "
+    SELECT
+        p.problem_id,
+        p.title,
+        LOWER(p.difficulty) AS difficulty,
+        0 AS total_submissions,
+        0 AS accepted_count,
+        0 AS acceptance_rate,
+        0 AS user_solved,
+        0 AS user_attempted
+    FROM coding_problems p
+    {$whereClause}
+    ORDER BY p.problem_id ASC
+    LIMIT {$limit} OFFSET {$offset}
+";
 
-$queryParams = array_merge($params, ['user_id1' => $userId, 'user_id2' => $userId]);
+$queryParams = $params;
+if ($submissionTable) {
+    $query = "
+        SELECT
+            p.problem_id,
+            p.title,
+            LOWER(p.difficulty) AS difficulty,
+            COALESCE(st.total_submissions, 0) AS total_submissions,
+            COALESCE(st.accepted_count, 0) AS accepted_count,
+            CASE
+                WHEN COALESCE(st.total_submissions, 0) = 0 THEN 0
+                ELSE ROUND((st.accepted_count * 100.0) / st.total_submissions, 1)
+            END AS acceptance_rate,
+            COALESCE(us.user_solved, 0) AS user_solved,
+            COALESCE(us.user_attempted, 0) AS user_attempted
+        FROM coding_problems p
+        LEFT JOIN (
+            SELECT
+                problem_id,
+                COUNT(*) AS total_submissions,
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted_count
+            FROM {$submissionTable}
+            GROUP BY problem_id
+        ) st ON p.problem_id = st.problem_id
+        LEFT JOIN (
+            SELECT
+                problem_id,
+                MAX(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS user_solved,
+                MAX(CASE WHEN status <> 'accepted' THEN 1 ELSE 0 END) AS user_attempted
+            FROM {$submissionTable}
+            WHERE user_id = :user_id
+            GROUP BY problem_id
+        ) us ON p.problem_id = us.problem_id
+        {$whereClause}
+        ORDER BY p.problem_id ASC
+        LIMIT {$limit} OFFSET {$offset}
+    ";
+
+    $queryParams = array_merge(['user_id' => $userId], $params);
+}
+
 $problems = $db->fetchAll($query, $queryParams);
 
-// Page config
+$baseQuery = [];
+if ($difficulty !== '') {
+    $baseQuery['difficulty'] = $difficulty;
+}
+if ($search !== '') {
+    $baseQuery['search'] = $search;
+}
+$buildPageUrl = static function ($targetPage) use ($baseQuery) {
+    $params = $baseQuery;
+    $params['page'] = (int)$targetPage;
+    return '?' . http_build_query($params);
+};
+
 $pageTitle = 'Coding Problems - PlacementCode';
 $additionalCSS = '
 .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
-
 .header-section { margin-bottom: 30px; }
 .header-section h1 { font-size: 2rem; margin-bottom: 8px; color: #e4e4e7; }
 .header-section p { color: #a1a1aa; font-size: 1rem; }
@@ -69,9 +135,7 @@ $additionalCSS = '
     gap: 15px;
     flex-wrap: wrap;
 }
-
 .filter-form { display: contents; }
-
 .filter-select, .filter-input {
     background: #0f0f0f;
     border: 1px solid #2a2a2a;
@@ -81,35 +145,25 @@ $additionalCSS = '
     font-size: 0.95rem;
     font-family: inherit;
 }
+.filter-select { min-width: 170px; cursor: pointer; }
+.filter-select:focus, .filter-input:focus { outline: none; border-color: #ffa116; }
+.filter-input { flex: 1; min-width: 300px; }
 
-.filter-select {
-    min-width: 160px;
-    cursor: pointer;
-}
-
-.filter-select:focus, .filter-input:focus {
-    outline: none;
-    border-color: #ffa116;
-}
-
-.filter-input {
-    flex: 1;
-    min-width: 300px;
-}
-
-.btn-filter {
-    background: #ffa116;
-    color: #000;
-    padding: 12px 24px;
+.btn-filter, .btn-clear {
+    padding: 12px 22px;
     border: none;
     border-radius: 8px;
     font-weight: 600;
     cursor: pointer;
-    transition: opacity 0.2s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-family: inherit;
 }
-
-.btn-filter:hover { opacity: 0.9; }
+.btn-filter { background: #ffa116; color: #000; }
+.btn-clear { background: #303036; color: #d4d4d8; border: 1px solid #3a3a3f; }
+.btn-filter:hover, .btn-clear:hover { opacity: 0.92; }
 
 .problems-table {
     background: #1a1a1a;
@@ -117,16 +171,8 @@ $additionalCSS = '
     border-radius: 12px;
     overflow: hidden;
 }
-
-.problems-table table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.problems-table thead {
-    background: #0f0f0f;
-}
-
+.problems-table table { width: 100%; border-collapse: collapse; }
+.problems-table thead { background: #0f0f0f; }
 .problems-table th {
     text-align: left;
     padding: 15px 20px;
@@ -137,58 +183,28 @@ $additionalCSS = '
     letter-spacing: 0.5px;
 }
 
-.col-status { width: 60px; text-align: center; }
-.col-acceptance { width: 120px; color: #71717a; }
+.col-status { width: 65px; text-align: center; }
+.col-acceptance { width: 130px; color: #71717a; }
 .col-difficulty { width: 120px; }
 
-.problems-table tbody tr {
-    border-top: 1px solid #2a2a2a;
-    transition: background 0.2s;
-}
+.problems-table tbody tr { border-top: 1px solid #2a2a2a; transition: background 0.2s; }
+.problems-table tbody tr:hover { background: #0f0f0f; }
+.problems-table td { padding: 18px 20px; }
 
-.problems-table tbody tr:hover {
-    background: #0f0f0f;
-}
-
-.problems-table td {
-    padding: 18px 20px;
-}
-
-.status-icon {
-    font-size: 1.2rem;
-}
-
+.status-icon { font-size: 1.1rem; line-height: 1; }
 .status-solved { color: #22c55e; }
 .status-attempted { color: #fbbf24; }
 
-.problem-title {
-    color: #e4e4e7;
-    text-decoration: none;
-    font-weight: 500;
-    transition: color 0.2s;
-}
-
-.problem-title:hover {
-    color: #ffa116;
-}
+.problem-title { color: #e4e4e7; text-decoration: none; font-weight: 500; transition: color 0.2s; }
+.problem-title:hover { color: #ffa116; }
 
 .difficulty-easy { color: #22c55e; font-weight: 600; }
 .difficulty-medium { color: #fbbf24; font-weight: 600; }
 .difficulty-hard { color: #ef4444; font-weight: 600; }
 
-.empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #71717a;
-}
+.empty-state { text-align: center; padding: 60px 20px; color: #71717a; }
 
-.pagination {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 30px;
-}
-
+.pagination { display: flex; justify-content: center; gap: 10px; margin-top: 30px; flex-wrap: wrap; }
 .page-link {
     background: #1a1a1a;
     border: 1px solid #2a2a2a;
@@ -199,36 +215,14 @@ $additionalCSS = '
     transition: all 0.2s;
     font-weight: 500;
 }
-
-.page-link:hover {
-    background: #2a2a2a;
-    color: #fff;
-    border-color: #3a3a3a;
-}
-
-.page-link.active {
-    background: #ffa116;
-    color: #000;
-    border-color: #ffa116;
-}
+.page-link:hover { background: #2a2a2a; color: #fff; border-color: #3a3a3a; }
+.page-link.active { background: #ffa116; color: #000; border-color: #ffa116; }
 
 @media (max-width: 768px) {
-    .filter-bar {
-        flex-direction: column;
-    }
-    
-    .filter-select, .filter-input {
-        width: 100%;
-    }
-    
-    .problems-table th, .problems-table td {
-        padding: 12px;
-        font-size: 0.9rem;
-    }
-    
-    .col-acceptance {
-        display: none;
-    }
+    .filter-bar { flex-direction: column; }
+    .filter-select, .filter-input { width: 100%; min-width: 100%; }
+    .problems-table th, .problems-table td { padding: 12px; font-size: 0.9rem; }
+    .col-acceptance { display: none; }
 }
 ';
 
@@ -237,27 +231,33 @@ include __DIR__ . '/../../includes/navbar.php';
 ?>
 
 <div class="container">
-    
     <div class="header-section">
-        <h1>💻 Coding Problems</h1>
-        <p>Practice coding problems and improve your skills</p>
+        <h1>Coding Problems</h1>
+        <p>Practice curated coding problems and track your progress.</p>
     </div>
 
-    <!-- Filter Bar -->
     <div class="filter-bar">
         <form method="GET" class="filter-form">
             <select name="difficulty" class="filter-select">
                 <option value="">All Difficulties</option>
-                <option value="Easy" <?php echo $difficulty === 'Easy' ? 'selected' : ''; ?>>Easy</option>
-                <option value="Medium" <?php echo $difficulty === 'Medium' ? 'selected' : ''; ?>>Medium</option>
-                <option value="Hard" <?php echo $difficulty === 'Hard' ? 'selected' : ''; ?>>Hard</option>
+                <option value="easy" <?php echo $difficulty === 'easy' ? 'selected' : ''; ?>>Easy</option>
+                <option value="medium" <?php echo $difficulty === 'medium' ? 'selected' : ''; ?>>Medium</option>
+                <option value="hard" <?php echo $difficulty === 'hard' ? 'selected' : ''; ?>>Hard</option>
             </select>
-            <input type="text" name="search" class="filter-input" placeholder="🔍 Search problems..." value="<?php echo htmlspecialchars($search); ?>">
+            <input
+                type="text"
+                name="search"
+                class="filter-input"
+                placeholder="Search problems by title or description"
+                value="<?php echo htmlspecialchars($search); ?>"
+            >
             <button type="submit" class="btn-filter">Apply Filters</button>
+            <?php if ($difficulty !== '' || $search !== ''): ?>
+                <a href="problems.php" class="btn-clear">Clear</a>
+            <?php endif; ?>
         </form>
     </div>
 
-    <!-- Problems Table -->
     <div class="problems-table">
         <table>
             <thead>
@@ -271,30 +271,37 @@ include __DIR__ . '/../../includes/navbar.php';
             <tbody>
                 <?php if (empty($problems)): ?>
                     <tr>
-                        <td colspan="4" class="empty-state">
-                            No problems found. Try adjusting your filters.
-                        </td>
+                        <td colspan="4" class="empty-state">No problems found. Try adjusting filters.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($problems as $p): ?>
+                        <?php
+                        $diff = strtolower((string)($p['difficulty'] ?? 'medium'));
+                        if (!in_array($diff, $allowedDifficulties, true)) {
+                            $diff = 'medium';
+                        }
+                        $displayDiff = ucfirst($diff);
+                        ?>
                         <tr>
                             <td class="col-status">
-                                <?php if ($p['user_solved']): ?>
-                                    <span class="status-icon status-solved">✓</span>
-                                <?php elseif ($p['user_attempted']): ?>
-                                    <span class="status-icon status-attempted">○</span>
+                                <?php if ((int)($p['user_solved'] ?? 0) > 0): ?>
+                                    <span class="status-icon status-solved">&#10003;</span>
+                                <?php elseif ((int)($p['user_attempted'] ?? 0) > 0): ?>
+                                    <span class="status-icon status-attempted">&#9675;</span>
+                                <?php else: ?>
+                                    <span class="status-icon" style="color:#4b5563;">&#183;</span>
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <a href="editor.php?id=<?php echo $p['problem_id']; ?>" class="problem-title">
-                                    <?php echo $p['problem_id']; ?>. <?php echo htmlspecialchars($p['title']); ?>
+                                <a href="editor.php?id=<?php echo (int)$p['problem_id']; ?>" class="problem-title">
+                                    <?php echo (int)$p['problem_id']; ?>. <?php echo htmlspecialchars((string)$p['title']); ?>
                                 </a>
                             </td>
                             <td class="col-acceptance">
-                                <?php echo number_format($p['acceptance_rate'] ?? 0, 1); ?>%
+                                <?php echo number_format((float)($p['acceptance_rate'] ?? 0), 1); ?>%
                             </td>
-                            <td class="col-difficulty difficulty-<?php echo strtolower($p['difficulty']); ?>">
-                                <?php echo $p['difficulty']; ?>
+                            <td class="col-difficulty difficulty-<?php echo $diff; ?>">
+                                <?php echo $displayDiff; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -303,26 +310,24 @@ include __DIR__ . '/../../includes/navbar.php';
         </table>
     </div>
 
-    <!-- Pagination -->
     <?php if ($totalPages > 1): ?>
         <div class="pagination">
             <?php if ($page > 1): ?>
-                <a href="?page=<?php echo $page - 1; ?><?php echo $difficulty ? '&difficulty=' . $difficulty : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?>" class="page-link">← Previous</a>
+                <a href="<?php echo htmlspecialchars($buildPageUrl($page - 1)); ?>" class="page-link">Previous</a>
             <?php endif; ?>
-            
+
             <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                <a href="?page=<?php echo $i; ?><?php echo $difficulty ? '&difficulty=' . $difficulty : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?>" 
-                   class="page-link <?php echo $i === $page ? 'active' : ''; ?>">
+                <a href="<?php echo htmlspecialchars($buildPageUrl($i)); ?>" class="page-link <?php echo $i === $page ? 'active' : ''; ?>">
                     <?php echo $i; ?>
                 </a>
             <?php endfor; ?>
-            
+
             <?php if ($page < $totalPages): ?>
-                <a href="?page=<?php echo $page + 1; ?><?php echo $difficulty ? '&difficulty=' . $difficulty : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?>" class="page-link">Next →</a>
+                <a href="<?php echo htmlspecialchars($buildPageUrl($page + 1)); ?>" class="page-link">Next</a>
             <?php endif; ?>
         </div>
     <?php endif; ?>
-
 </div>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
+

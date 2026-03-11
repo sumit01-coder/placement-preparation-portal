@@ -3,17 +3,7 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../classes/Auth.php';
 require_once __DIR__ . '/../../classes/Admin.php';
 
-Auth::requireLogin();
-
-// Check if user is admin
-$userId = Auth::getUserId();
-$db = Database::getInstance();
-$userRole = $db->fetchOne("SELECT role_id FROM users WHERE user_id = :uid", ['uid' => $userId])['role_id'];
-
-if ($userRole != 2) {
-    header('Location: ../../modules/dashboard/index.php');
-    exit();
-}
+Auth::requireAdmin();
 
 // Handle delete request
 if (isset($_POST['delete_problem'])) {
@@ -148,6 +138,7 @@ $problems = $admin->getProblems($limit, $offset);
             <a href="users.php">Users</a>
             <a href="problems.php" class="active">Problems</a>
             <a href="tests.php">Tests</a>
+            <a href="company-drives.php">Company Drives</a>
             <a href="analytics.php">Analytics</a>
         </div>
         <div style="color: #71717a; font-size: 0.9rem;">

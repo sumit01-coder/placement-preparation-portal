@@ -1,5 +1,5 @@
-# Sensitive configuration files
-config/*.php
+# Sensitive configuration files – keep the example template, ignore the real config
+config/config.php
 db.php
 
 # User uploads
@@ -22,6 +22,11 @@ Thumbs.db
 
 # PHP session files
 sessions/
+tmp_sessions/
+
+# Test and seed scripts
+test_*.php
+seed_*.php
 
 # Vendor directory (if using Composer)
 vendor/

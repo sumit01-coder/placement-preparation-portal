@@ -6,6 +6,29 @@
 class Database {
     private static $instance = null;
     private $connection;
+    private $tableExistsCache = [];
+    private $columnExistsCache = [];
+
+    private function filterNamedParamsForSql(string $sql, array $params): array {
+        $hasStringKey = false;
+        foreach (array_keys($params) as $key) {
+            if (is_string($key)) {
+                $hasStringKey = true;
+                break;
+            }
+        }
+
+        if (!$hasStringKey) {
+            return $params;
+        }
+
+        if (!preg_match_all('/:([a-zA-Z_][a-zA-Z0-9_]*)/', $sql, $matches)) {
+            return [];
+        }
+
+        $allowed = array_fill_keys($matches[1], true);
+        return array_intersect_key($params, $allowed);
+    }
     
     private function __construct() {
         try {
@@ -39,6 +62,9 @@ class Database {
     public function query($sql, $params = []) {
         try {
             $stmt = $this->connection->prepare($sql);
+            if (is_array($params) && !empty($params)) {
+                $params = $this->filterNamedParamsForSql($sql, $params);
+            }
             $stmt->execute($params);
             return $stmt;
         } catch (PDOException $e) {
@@ -115,6 +141,65 @@ class Database {
     public function delete($table, $where, $whereParams = []) {
         $sql = "DELETE FROM {$table} WHERE {$where}";
         return $this->query($sql, $whereParams);
+    }
+
+    public function tableExists($table) {
+        if (array_key_exists($table, $this->tableExistsCache)) {
+            return $this->tableExistsCache[$table];
+        }
+
+        try {
+            $row = $this->fetchOne(
+                "SELECT COUNT(*) AS cnt
+                 FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                 AND table_name = :table_name",
+                ['table_name' => $table]
+            );
+            $this->tableExistsCache[$table] = ((int)($row['cnt'] ?? 0)) > 0;
+        } catch (Exception $e) {
+            $this->tableExistsCache[$table] = false;
+        }
+
+        return $this->tableExistsCache[$table];
+    }
+
+    public function columnExists($table, $column) {
+        $cacheKey = $table . '.' . $column;
+        if (array_key_exists($cacheKey, $this->columnExistsCache)) {
+            return $this->columnExistsCache[$cacheKey];
+        }
+
+        if (!$this->tableExists($table)) {
+            $this->columnExistsCache[$cacheKey] = false;
+            return false;
+        }
+
+        try {
+            $row = $this->fetchOne(
+                "SELECT COUNT(*) AS cnt
+                 FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                 AND table_name = :table_name
+                 AND column_name = :column_name",
+                ['table_name' => $table, 'column_name' => $column]
+            );
+            $this->columnExistsCache[$cacheKey] = ((int)($row['cnt'] ?? 0)) > 0;
+        } catch (Exception $e) {
+            $this->columnExistsCache[$cacheKey] = false;
+        }
+
+        return $this->columnExistsCache[$cacheKey];
+    }
+
+    public function firstExistingTable(array $candidates) {
+        foreach ($candidates as $candidate) {
+            if ($this->tableExists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
     
     // Prevent cloning

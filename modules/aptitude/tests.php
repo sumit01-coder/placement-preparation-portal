@@ -1,45 +1,48 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../classes/Auth.php';
+require_once __DIR__ . '/../../classes/Aptitude.php';
 
 Auth::requireLogin();
+
 $userId = Auth::getUserId();
-$db = Database::getInstance();
+$aptitude = new Aptitude();
+$tests = $aptitude->getTests();
+$userAttempts = $aptitude->getUserHistory($userId, 5);
 
-// Get all available tests
-$tests = $db->fetchAll("SELECT * FROM aptitude_tests ORDER BY created_at DESC");
+$requestedCategory = strtolower(trim((string)($_GET['category'] ?? 'all')));
 
-// Get user's test history
-$userAttempts = $db->fetchAll(
-    "SELECT ta.*, at.test_name, at.category, at.duration_minutes
-     FROM test_attempts ta
-     JOIN aptitude_tests at ON ta.test_id = at.test_id
-     WHERE ta.user_id = :uid
-     ORDER BY ta.attempted_at DESC
-     LIMIT 5",
-    ['uid' => $userId]
-);
+$toSlug = static function ($value) {
+    $slug = strtolower((string)$value);
+    $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+    $slug = trim((string)$slug, '-');
+    return $slug !== '' ? $slug : 'general';
+};
 
-// Page config
+$categories = [];
+foreach ($tests as $test) {
+    $categoryName = trim((string)($test['category'] ?? 'General'));
+    $categorySlug = $toSlug($categoryName);
+    $categories[$categorySlug] = $categoryName;
+}
+ksort($categories);
+
+if ($requestedCategory !== 'all' && !isset($categories[$requestedCategory])) {
+    $requestedCategory = 'all';
+}
+
 $pageTitle = 'Aptitude Tests - PlacementCode';
 $additionalCSS = '
 .container { max-width: 1400px; margin: 0 auto; padding: 30px 20px; }
-
 .header-section { margin-bottom: 30px; }
 .header-section h1 { font-size: 2rem; margin-bottom: 8px; color: #e4e4e7; }
 .header-section p { color: #a1a1aa; font-size: 1rem; }
 
-.category-tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 30px;
-    flex-wrap: wrap;
-}
-
+.category-tabs { display: flex; gap: 10px; margin-bottom: 30px; flex-wrap: wrap; }
 .category-tab {
     background: #1a1a1a;
     border: 1px solid #2a2a2a;
-    padding: 12px 24px;
+    padding: 12px 20px;
     border-radius: 8px;
     color: #a1a1aa;
     cursor: pointer;
@@ -47,17 +50,10 @@ $additionalCSS = '
     font-weight: 500;
     font-family: inherit;
 }
-
 .category-tab:hover { background: #2a2a2a; color: #fff; }
 .category-tab.active { background: #ffa116; color: #000; border-color: #ffa116; }
 
-.tests-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 20px;
-    margin-bottom: 40px;
-}
-
+.tests-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; margin-bottom: 40px; }
 .test-card {
     background: #1a1a1a;
     border: 1px solid #2a2a2a;
@@ -65,46 +61,28 @@ $additionalCSS = '
     padding: 25px;
     transition: transform 0.2s, border-color 0.2s;
 }
-
-.test-card:hover {
-    transform: translateY(-4px);
-    border-color: #ffa116;
-}
-
-.test-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 15px;
-}
-
-.test-title {
-    font-size: 1.3rem;
-    font-weight: 600;
-    color: #e4e4e7;
-    margin-bottom: 8px;
-}
+.test-card:hover { transform: translateY(-4px); border-color: #ffa116; }
+.test-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px; gap: 10px; }
+.test-title { font-size: 1.3rem; font-weight: 600; color: #e4e4e7; margin-bottom: 8px; }
+.test-desc { color: #a1a1aa; margin: 0 0 12px; font-size: 0.92rem; line-height: 1.5; }
 
 .category-badge {
     padding: 6px 12px;
     border-radius: 12px;
     font-size: 0.75rem;
     font-weight: 600;
+    background: rgba(255, 161, 22, 0.15);
+    color: #ffa116;
 }
-
-.cat-quantitative { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-.cat-logical { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
-.cat-verbal { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 
 .test-stats {
     display: flex;
-    gap: 20px;
+    gap: 18px;
     margin: 15px 0;
     padding: 15px 0;
     border-top: 1px solid #2a2a2a;
     border-bottom: 1px solid #2a2a2a;
 }
-
 .stat-item { display: flex; flex-direction: column; }
 .stat-value { font-size: 1.1rem; font-weight: 700; color: #ffa116; }
 .stat-label { font-size: 0.75rem; color: #71717a; margin-top: 4px; text-transform: uppercase; }
@@ -122,16 +100,9 @@ $additionalCSS = '
     font-family: inherit;
     font-size: 0.95rem;
 }
-
 .btn-start:hover { opacity: 0.9; }
 
-.empty-state {
-    grid-column: 1/-1;
-    text-align: center;
-    padding: 80px 20px;
-    color: #71717a;
-}
-
+.empty-state { grid-column: 1/-1; text-align: center; padding: 80px 20px; color: #71717a; }
 .empty-state h3 { margin-bottom: 8px; color: #a1a1aa; }
 
 .history-section {
@@ -140,16 +111,9 @@ $additionalCSS = '
     border-radius: 12px;
     padding: 25px;
 }
-
 .history-section h2 { font-size: 1.4rem; margin-bottom: 20px; color: #e4e4e7; }
-
-.history-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
+.history-table { width: 100%; border-collapse: collapse; }
 .history-table thead { background: #0f0f0f; }
-
 .history-table th {
     text-align: left;
     padding: 12px 16px;
@@ -159,48 +123,24 @@ $additionalCSS = '
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-
-.history-table tbody tr {
-    border-top: 1px solid #2a2a2a;
-    transition: background 0.2s;
-}
-
+.history-table tbody tr { border-top: 1px solid #2a2a2a; transition: background 0.2s; }
 .history-table tbody tr:hover { background: #0f0f0f; }
-
-.history-table td {
-    padding: 14px 16px;
-    font-size: 0.95rem;
-}
-
+.history-table td { padding: 14px 16px; font-size: 0.95rem; }
 .td-muted { color: #a1a1aa; }
-
 .score-badge {
     padding: 6px 12px;
     border-radius: 12px;
     font-size: 0.85rem;
     font-weight: 600;
 }
-
 .score-high { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .score-medium { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
 .score-low { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
 @media (max-width: 768px) {
-    .tests-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .category-tabs {
-        flex-direction: column;
-    }
-    
-    .history-table {
-        font-size: 0.85rem;
-    }
-    
-    .history-table th, .history-table td {
-        padding: 10px 8px;
-    }
+    .tests-grid { grid-template-columns: 1fr; }
+    .category-tabs { flex-direction: column; }
+    .history-table th, .history-table td { padding: 10px 8px; }
 }
 ';
 
@@ -209,66 +149,72 @@ include __DIR__ . '/../../includes/navbar.php';
 ?>
 
 <div class="container">
-    
     <div class="header-section">
-        <h1>📚 Aptitude Tests</h1>
-        <p>Practice aptitude tests to improve your problem-solving skills</p>
+        <h1>Aptitude Tests</h1>
+        <p>Practice tests built by the admin panel and track your recent scores.</p>
     </div>
 
-    <!-- Category Filters -->
     <div class="category-tabs">
-        <div class="category-tab active" onclick="filterTests('all')">All Tests</div>
-        <div class="category-tab" onclick="filterTests('quantitative')">Quantitative</div>
-        <div class="category-tab" onclick="filterTests('logical')">Logical Reasoning</div>
-        <div class="category-tab" onclick="filterTests('verbal')">Verbal Ability</div>
+        <button type="button" class="category-tab<?php echo $requestedCategory === 'all' ? ' active' : ''; ?>" onclick="filterTests('all', this)">All Tests</button>
+        <?php foreach ($categories as $slug => $name): ?>
+            <button type="button" class="category-tab<?php echo $requestedCategory === $slug ? ' active' : ''; ?>" onclick="filterTests('<?php echo htmlspecialchars($slug); ?>', this)">
+                <?php echo htmlspecialchars($name); ?>
+            </button>
+        <?php endforeach; ?>
     </div>
 
-    <!-- Tests Grid -->
-    <div class="tests-grid">
+    <div class="tests-grid" id="testsGrid">
         <?php if (empty($tests)): ?>
             <div class="empty-state">
                 <h3>No tests available</h3>
-                <p>Check back later for new tests</p>
+                <p>Ask admin to create a test and add questions.</p>
             </div>
         <?php else: ?>
             <?php foreach ($tests as $test): ?>
-                <div class="test-card" data-category="<?php echo strtolower($test['category']); ?>">
+                <?php
+                $category = trim((string)($test['category'] ?? 'General'));
+                $categorySlug = $toSlug($category);
+                $questionCount = (int)($test['question_count'] ?? $test['total_questions'] ?? 0);
+                $duration = (int)($test['duration_minutes'] ?? 0);
+                $difficulty = trim((string)($test['difficulty'] ?? 'Medium'));
+                $description = trim((string)($test['description'] ?? ''));
+                ?>
+                <div class="test-card" data-category="<?php echo htmlspecialchars($categorySlug); ?>">
                     <div class="test-header">
                         <div>
-                            <div class="test-title"><?php echo htmlspecialchars($test['test_name']); ?></div>
-                            <span class="category-badge cat-<?php echo strtolower($test['category']); ?>">
-                                <?php echo $test['category']; ?>
-                            </span>
+                            <div class="test-title"><?php echo htmlspecialchars($test['test_name'] ?? 'Untitled Test'); ?></div>
+                            <span class="category-badge"><?php echo htmlspecialchars($category); ?></span>
                         </div>
                     </div>
-                    
+
+                    <?php if ($description !== ''): ?>
+                        <p class="test-desc"><?php echo htmlspecialchars($description); ?></p>
+                    <?php endif; ?>
+
                     <div class="test-stats">
                         <div class="stat-item">
-                            <span class="stat-value"><?php echo $test['total_questions'] ?? 20; ?></span>
+                            <span class="stat-value"><?php echo $questionCount; ?></span>
                             <span class="stat-label">Questions</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-value"><?php echo $test['duration_minutes']; ?></span>
+                            <span class="stat-value"><?php echo $duration; ?></span>
                             <span class="stat-label">Minutes</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-value"><?php echo $test['difficulty'] ?? 'Medium'; ?></span>
+                            <span class="stat-value"><?php echo htmlspecialchars($difficulty); ?></span>
                             <span class="stat-label">Level</span>
                         </div>
                     </div>
-                    
-                    <button class="btn-start" onclick="startTest(<?php echo $test['test_id']; ?>)">
-                        Start Test →
-                    </button>
+
+                    <button class="btn-start" onclick="startTest(<?php echo (int)$test['test_id']; ?>)">Start Test</button>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
 
-    <!-- Test History -->
     <?php if (!empty($userAttempts)): ?>
         <div class="history-section">
-            <h2>📊 Recent Attempts</h2>
+            <h2>Recent Attempts</h2>
             <table class="history-table">
                 <thead>
                     <tr>
@@ -281,55 +227,65 @@ include __DIR__ . '/../../includes/navbar.php';
                 </thead>
                 <tbody>
                     <?php foreach ($userAttempts as $attempt): ?>
+                        <?php
+                        $attemptCategory = trim((string)($attempt['category'] ?? 'General'));
+                        $score = (int)($attempt['score'] ?? 0);
+                        $total = (int)($attempt['total_questions'] ?? $attempt['total_marks'] ?? 0);
+                        if ($total <= 0) {
+                            $total = 1;
+                        }
+                        $percentage = isset($attempt['percentage']) ? (float)$attempt['percentage'] : round(($score / $total) * 100, 2);
+                        $scoreClass = $percentage >= 70 ? 'score-high' : ($percentage >= 50 ? 'score-medium' : 'score-low');
+                        $timeTaken = isset($attempt['time_taken']) ? (int)$attempt['time_taken'] : (int)round(((int)($attempt['duration_seconds'] ?? 0)) / 60);
+                        $attemptedAt = $attempt['attempted_at'] ?? null;
+                        ?>
                         <tr>
-                            <td><?php echo htmlspecialchars($attempt['test_name']); ?></td>
+                            <td><?php echo htmlspecialchars($attempt['test_name'] ?? 'Unknown Test'); ?></td>
+                            <td><span class="category-badge"><?php echo htmlspecialchars($attemptCategory); ?></span></td>
                             <td>
-                                <span class="category-badge cat-<?php echo strtolower($attempt['category']); ?>">
-                                    <?php echo $attempt['category']; ?>
-                                </span>
-                            </td>
-                            <td>
-                                <?php 
-                                $percentage = ($attempt['score'] / $attempt['total_questions']) * 100;
-                                $scoreClass = $percentage >= 70 ? 'score-high' : ($percentage >= 50 ? 'score-medium' : 'score-low');
-                                ?>
                                 <span class="score-badge <?php echo $scoreClass; ?>">
-                                    <?php echo $attempt['score']; ?>/<?php echo $attempt['total_questions']; ?>
-                                    (<?php echo round($percentage); ?>%)
+                                    <?php echo $score; ?>/<?php echo $total; ?> (<?php echo round($percentage); ?>%)
                                 </span>
                             </td>
-                            <td class="td-muted"><?php echo $attempt['time_taken']; ?> min</td>
-                            <td class="td-muted"><?php echo date('M j, Y', strtotime($attempt['attempted_at'])); ?></td>
+                            <td class="td-muted"><?php echo $timeTaken; ?> min</td>
+                            <td class="td-muted">
+                                <?php echo $attemptedAt ? htmlspecialchars(date('M j, Y', strtotime($attemptedAt))) : '-'; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
         </div>
     <?php endif; ?>
-
 </div>
 
 <script>
-function filterTests(category) {
-    // Update active tab
-    document.querySelectorAll('.category-tab').forEach(tab => {
+function filterTests(category, buttonEl) {
+    document.querySelectorAll('.category-tab').forEach(function(tab) {
         tab.classList.remove('active');
     });
-    event.target.classList.add('active');
-    
-    // Filter cards
-    document.querySelectorAll('.test-card').forEach(card => {
-        if (category === 'all' || card.dataset.category === category) {
-            card.style.display = 'block';
-        } else {
-            card.style.display = 'none';
-        }
+    if (buttonEl) {
+        buttonEl.classList.add('active');
+    }
+
+    document.querySelectorAll('.test-card').forEach(function(card) {
+        card.style.display = (category === 'all' || card.dataset.category === category) ? 'block' : 'none';
     });
 }
 
 function startTest(testId) {
-    window.location.href = `take-test.php?id=${testId}`;
+    window.location.href = 'take-test.php?id=' + encodeURIComponent(testId);
 }
+
+(function initCategoryFilter() {
+    const initialCategory = <?php echo json_encode($requestedCategory); ?>;
+    if (initialCategory === 'all') {
+        return;
+    }
+
+    const activeBtn = document.querySelector('.category-tab.active');
+    filterTests(initialCategory, activeBtn);
+})();
 </script>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

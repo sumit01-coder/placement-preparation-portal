@@ -1,22 +1,26 @@
 <?php
 require_once '../../config/config.php';
 require_once '../../classes/Auth.php';
-require_once '../../classes/Admin.php';
+require_once '../../classes/Aptitude.php';
 require_once '../../includes/header.php';
 require_once '../../includes/navbar.php';
 
 Auth::requireAdmin();
 
-$admin = new Admin();
+$aptitude = new Aptitude();
 $message = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $result = $admin->addTest($_POST);
-    if ($result['success']) {
-        $message = $result['message'];
+    if (!Auth::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid request. Please refresh and try again.';
     } else {
-        $error = $result['message'];
+        $result = $aptitude->createTest($_POST);
+        if ($result['success']) {
+            $message = $result['message'];
+        } else {
+            $error = $result['message'];
+        }
     }
 }
 ?>
@@ -152,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::getCsrfToken()); ?>">
             <div class="form-grid">
                 <div class="form-group full-width">
                     <label class="form-label">Test Name</label>

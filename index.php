@@ -3,8 +3,7 @@ require_once 'config/config.php';
 
 // Auto-redirect if already logged in
 if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
-    if ((isset($_SESSION['email']) && $_SESSION['email'] === 'admin@placementcode.com') || 
-        (isset($_SESSION['role']) && $_SESSION['role'] === 'admin')) {
+    if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
         header('Location: modules/admin/dashboard.php');
         exit;
     }
@@ -74,6 +73,8 @@ if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
         }
 
         .nav-link:hover { color: #fff; }
+
+        .nav-link.admin-link { color: #fca5a5; }
 
         /* Hero Section */
         .hero {
@@ -251,6 +252,9 @@ if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
 
     <nav class="navbar">
         <a href="index.php" class="logo">⚡ Placement<span>Code</span></a>
+        <div class="nav-links">
+            <a href="modules/auth/admin-login.php" class="nav-link admin-link">Admin Login</a>
+        </div>
     </nav>
 
     <div class="hero">
@@ -306,7 +310,7 @@ if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
                     </div>
                     <button type="submit" class="btn-primary">Sign In</button>
                     <p style="text-align: center; margin-top: 15px; font-size: 0.9rem; color: #71717a;">
-                        Admin? Login here directly too.
+                        Admin? Use the dedicated <a href="modules/auth/admin-login.php" style="color:#fca5a5; text-decoration:none;">admin login</a>.
                     </p>
                 </form>
 
@@ -372,14 +376,7 @@ if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
                 
                 if (result.success) {
                     alert.className = 'alert success';
-                    // The redirection URL is determined by the backend Auth.php
-                    // But if you want to be double sure about the email:
-                    const email = formData.get('email');
-                    if (email === 'admin@placementcode.com') {
-                         setTimeout(() => window.location.href = 'modules/admin/dashboard.php', 1000);
-                    } else {
-                         setTimeout(() => window.location.href = result.redirect, 1000);
-                    }
+                    setTimeout(() => window.location.href = result.redirect, 1000);
                 } else {
                     alert.className = 'alert error';
                     btn.textContent = originalText;

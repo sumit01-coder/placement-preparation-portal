@@ -165,4 +165,37 @@ class FocusMode {
             return [];
         }
     }
+    // Clear violations for current active session (Reward for solving problem)
+    public function clearCurrentSessionViolations($userId) {
+        try {
+            // Find active session
+            $session = $this->db->fetchOne(
+                "SELECT session_id FROM focus_sessions WHERE user_id = :user_id AND end_time IS NULL ORDER BY start_time DESC LIMIT 1",
+                ['user_id' => $userId]
+            );
+            
+            if ($session) {
+                // Delete violations for this session
+                $this->db->query(
+                    "DELETE FROM focus_violations WHERE session_id = :session_id",
+                    ['session_id' => $session['session_id']]
+                );
+                
+                // Reset violation count in session table
+                $this->db->update('focus_sessions',
+                    ['violation_count' => 0],
+                    'session_id = :session_id',
+                    ['session_id' => $session['session_id']]
+                );
+                
+                return ['success' => true, 'message' => 'Violations cleared'];
+            }
+            
+            return ['success' => false, 'message' => 'No active session found'];
+            
+        } catch (Exception $e) {
+            error_log("Clear Violations Error: " . $e->getMessage());
+            return ['success' => false, 'message' => 'Failed to clear violations'];
+        }
+    }
 }

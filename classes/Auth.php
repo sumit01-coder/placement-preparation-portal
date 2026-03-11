@@ -68,7 +68,7 @@ class Auth {
     }
     
     // Login user
-    public function login($email, $password, $rememberMe = false) {
+    public function login($email, $password, $rememberMe = false, $adminOnly = false) {
         try {
             $user = $this->db->fetchOne(
                 "SELECT u.*, up.full_name, r.role_name 
@@ -90,6 +90,10 @@ class Auth {
             // Verify password
             if (!password_verify($password, $user['password_hash'])) {
                 return ['success' => false, 'message' => 'Invalid email or password'];
+            }
+
+            if ($adminOnly && strtolower((string)($user['role_name'] ?? '')) !== 'admin') {
+                return ['success' => false, 'message' => 'Admin access required'];
             }
             
             // Update last login
@@ -114,6 +118,7 @@ class Auth {
             $_SESSION['user_id'] = $user['user_id'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['full_name'] = $user['full_name'];
+            $_SESSION['user_name'] = $user['full_name'];
             $_SESSION['role'] = $user['role_name'];
             $_SESSION['logged_in'] = true;
             

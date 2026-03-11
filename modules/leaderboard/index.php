@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../classes/Leaderboard.php';
 
 Auth::requireLogin();
 $userId = Auth::getUserId();
+$isAdminViewer = Auth::isAdmin();
 
 $leaderboard = new Leaderboard();
 $rankings = $leaderboard->getGlobalLeaderboard(100);
@@ -32,6 +33,16 @@ $additionalCSS = '
     font-size: 1.1rem;
     margin-top: 15px;
     box-shadow: 0 4px 15px rgba(255, 161, 22, 0.3);
+}
+.info-banner {
+    max-width: 760px;
+    margin: 18px auto 0;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    color: #bae6fd;
+    font-size: 0.95rem;
 }
 
 .leaderboard-card {
@@ -128,15 +139,18 @@ include __DIR__ . '/../../includes/navbar.php';
     <div class="header-section">
         <h1>🏆 Global Leaderboard</h1>
         <p>Compete with the best coders worldwide</p>
-        <?php if ($myRank): ?>
+        <?php if (!$isAdminViewer && $myRank && !empty($myRank['rank'])): ?>
             <div class="my-rank-badge">Your Rank: #<?php echo $myRank['rank'] ?? 'N/A'; ?></div>
+        <?php endif; ?>
+        <?php if ($isAdminViewer): ?>
+            <div class="info-banner">Leaderboard rankings only include student accounts. Admin submissions are excluded from the global ranking.</div>
         <?php endif; ?>
     </div>
 
     <?php if (empty($rankings)): ?>
         <div class="empty-state">
-            <h2>No Rankings Yet</h2>
-            <p>Be the first to solve problems and top the leaderboard!</p>
+            <h2><?php echo $isAdminViewer ? 'No Student Rankings Yet' : 'No Rankings Yet'; ?></h2>
+            <p><?php echo $isAdminViewer ? 'Students will appear here after they start solving coding problems.' : 'Be the first to solve problems and top the leaderboard!'; ?></p>
         </div>
     <?php else: ?>
         <div class="leaderboard-card">

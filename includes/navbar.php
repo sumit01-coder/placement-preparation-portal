@@ -28,6 +28,11 @@ $userInitial = strtoupper(substr($userName, 0, 1));
            class="<?php echo ($currentModule === 'aptitude') ? 'active' : ''; ?>">
             Aptitude
         </a>
+
+        <a href="<?php echo BASE_URL; ?>/modules/companies/list.php" 
+           class="<?php echo ($currentModule === 'companies') ? 'active' : ''; ?>">
+            Companies
+        </a>
         
         <a href="<?php echo BASE_URL; ?>/modules/leaderboard/index.php" 
            class="<?php echo ($currentModule === 'leaderboard') ? 'active' : ''; ?>">

@@ -3,17 +3,7 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../classes/Auth.php';
 require_once __DIR__ . '/../../classes/Admin.php';
 
-Auth::requireLogin();
-
-// Check if user is admin (role_id = 2)
-$userId = Auth::getUserId();
-$db = Database::getInstance();
-$userRole = $db->fetchOne("SELECT role_id FROM users WHERE user_id = :uid", ['uid' => $userId])['role_id'];
-
-if ($userRole != 2) {
-    header('Location: ../../modules/dashboard/index.php');
-    exit();
-}
+Auth::requireAdmin();
 
 $admin = new Admin();
 $stats = $admin->getDashboardStats();
@@ -141,6 +131,7 @@ $recentActivity = $admin->getRecentActivity(10);
             <a href="users.php">Users</a>
             <a href="problems.php">Problems</a>
             <a href="tests.php">Tests</a>
+            <a href="company-drives.php">Company Drives</a>
             <a href="analytics.php">Analytics</a>
         </div>
         <div style="color: #71717a; font-size: 0.9rem;">
@@ -209,6 +200,7 @@ $recentActivity = $admin->getRecentActivity(10);
                     <a href="users.php" class="action-btn">👥 Manage Users</a>
                     <a href="problems.php" class="action-btn">💻 Manage Problems</a>
                     <a href="tests.php" class="action-btn">📚 Manage Tests</a>
+                    <a href="company-drives.php" class="action-btn">🏢 Manage Company Drives</a>
                     <a href="analytics.php" class="action-btn">📊 View Analytics</a>
                 </div>
             </div>
