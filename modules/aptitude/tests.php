@@ -9,6 +9,7 @@ $userId = Auth::getUserId();
 $aptitude = new Aptitude();
 $tests = $aptitude->getTests();
 $userAttempts = $aptitude->getUserHistory($userId, 5);
+$completedAttemptsByTest = $aptitude->getUserCompletedAttemptsByTest($userId);
 
 $requestedCategory = strtolower(trim((string)($_GET['category'] ?? 'all')));
 
@@ -101,6 +102,54 @@ $additionalCSS = '
     font-size: 0.95rem;
 }
 .btn-start:hover { opacity: 0.9; }
+.btn-start.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: #2a2a2a;
+}
+.completed-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 10px;
+}
+.completed-note {
+    font-size: 0.85rem;
+    color: #a1a1aa;
+    font-weight: 600;
+}
+.btn-view {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 161, 22, 0.12);
+    border: 1px solid rgba(255, 161, 22, 0.25);
+    color: #fff;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: background 0.2s, border-color 0.2s;
+}
+.btn-view:hover { background: rgba(255, 161, 22, 0.18); border-color: rgba(255, 161, 22, 0.35); }
+.attempt-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.attempt-score {
+    font-size: 0.85rem;
+    color: #e4e4e7;
+    font-weight: 700;
+}
 
 .empty-state { grid-column: 1/-1; text-align: center; padding: 80px 20px; color: #71717a; }
 .empty-state h3 { margin-bottom: 8px; color: #a1a1aa; }
@@ -178,6 +227,15 @@ include __DIR__ . '/../../includes/navbar.php';
                 $duration = (int)($test['duration_minutes'] ?? 0);
                 $difficulty = trim((string)($test['difficulty'] ?? 'Medium'));
                 $description = trim((string)($test['description'] ?? ''));
+                $testId = (int)($test['test_id'] ?? 0);
+                $completedAttempt = ($testId > 0 && isset($completedAttemptsByTest[$testId])) ? $completedAttemptsByTest[$testId] : null;
+                $completedAttemptId = $completedAttempt ? (int)($completedAttempt['attempt_id'] ?? 0) : 0;
+                $attemptScore = $completedAttempt ? (int)($completedAttempt['score'] ?? 0) : 0;
+                $attemptTotal = $completedAttempt ? (int)($completedAttempt['total_marks'] ?? $completedAttempt['total_questions'] ?? 0) : 0;
+                if ($attemptTotal <= 0) {
+                    $attemptTotal = $questionCount > 0 ? $questionCount : 1;
+                }
+                $attemptPercentage = $completedAttempt ? (float)($completedAttempt['percentage'] ?? 0) : 0;
                 ?>
                 <div class="test-card" data-category="<?php echo htmlspecialchars($categorySlug); ?>">
                     <div class="test-header">
@@ -185,6 +243,12 @@ include __DIR__ . '/../../includes/navbar.php';
                             <div class="test-title"><?php echo htmlspecialchars($test['test_name'] ?? 'Untitled Test'); ?></div>
                             <span class="category-badge"><?php echo htmlspecialchars($category); ?></span>
                         </div>
+                        <?php if ($completedAttemptId > 0): ?>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                                <span class="attempt-pill">Completed</span>
+                                <span class="attempt-score"><?php echo $attemptScore; ?>/<?php echo $attemptTotal; ?> (<?php echo round($attemptPercentage); ?>%)</span>
+                            </div>
+                        <?php endif; ?>
                     </div>
 
                     <?php if ($description !== ''): ?>
@@ -206,7 +270,15 @@ include __DIR__ . '/../../includes/navbar.php';
                         </div>
                     </div>
 
-                    <button class="btn-start" onclick="startTest(<?php echo (int)$test['test_id']; ?>)">Start Test</button>
+                    <?php if ($completedAttemptId > 0): ?>
+                        <div class="completed-row">
+                            <div class="completed-note">Aptitude already completed.</div>
+                            <a class="btn-view" href="result.php?id=<?php echo $completedAttemptId; ?>">View Result</a>
+                            <button class="btn-start disabled" type="button" disabled>Aptitude Already Completed</button>
+                        </div>
+                    <?php else: ?>
+                        <button class="btn-start" onclick="startTest(<?php echo $testId; ?>)">Start Test</button>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>

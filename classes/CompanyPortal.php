@@ -1354,13 +1354,33 @@ class CompanyPortal {
             }
 
             $existing = $this->db->fetchOne(
-                "SELECT call_id
+                "SELECT call_id, status
                  FROM company_interview_calls
                  WHERE call_id = :call_id",
                 ['call_id' => $callId]
             );
             if (!$existing) {
                 return ['success' => false, 'message' => 'Interview call record not found.'];
+            }
+
+            $currentStatus = strtolower((string)($existing['status'] ?? 'pending'));
+            $allowedNext = match ($currentStatus) {
+                'pending' => ['invited', 'waitlisted', 'rejected'],
+                'waitlisted' => ['invited', 'selected', 'rejected'],
+                'invited' => ['selected', 'rejected'],
+                'selected' => [],
+                'rejected' => [],
+                default => []
+            };
+
+            if ($status !== $currentStatus) {
+                $allowedNow = array_merge([$currentStatus], $allowedNext);
+                if (!in_array($status, $allowedNow, true)) {
+                    return [
+                        'success' => false,
+                        'message' => 'Invalid status transition. You can only move forward from ' . $currentStatus . '.'
+                    ];
+                }
             }
 
             $this->db->update(

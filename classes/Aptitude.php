@@ -613,6 +613,97 @@ class Aptitude {
         return $rows;
     }
 
+    public function getLatestCompletedAttemptIdForTest($userId, $testId): ?int {
+        $userId = (int)$userId;
+        $testId = (int)$testId;
+        if ($userId <= 0 || $testId <= 0) {
+            return null;
+        }
+
+        if ($this->tableExists('aptitude_attempts')) {
+            $sql = "SELECT attempt_id
+                    FROM aptitude_attempts
+                    WHERE user_id = :user_id AND test_id = :test_id";
+            if ($this->columnExists('aptitude_attempts', 'status')) {
+                $sql .= " AND status = 'completed'";
+            }
+            $sql .= $this->columnExists('aptitude_attempts', 'end_time')
+                ? " ORDER BY end_time DESC, attempt_id DESC"
+                : " ORDER BY start_time DESC, attempt_id DESC";
+            $sql .= " LIMIT 1";
+
+            $row = $this->db->fetchOne($sql, ['user_id' => $userId, 'test_id' => $testId]);
+            return $row && isset($row['attempt_id']) ? (int)$row['attempt_id'] : null;
+        }
+
+        if ($this->tableExists('test_attempts')) {
+            $row = $this->db->fetchOne(
+                "SELECT attempt_id
+                 FROM test_attempts
+                 WHERE user_id = :user_id AND test_id = :test_id
+                 ORDER BY attempted_at DESC, attempt_id DESC
+                 LIMIT 1",
+                ['user_id' => $userId, 'test_id' => $testId]
+            );
+            return $row && isset($row['attempt_id']) ? (int)$row['attempt_id'] : null;
+        }
+
+        return null;
+    }
+
+    public function getUserCompletedAttemptsByTest($userId): array {
+        $userId = (int)$userId;
+        if ($userId <= 0) {
+            return [];
+        }
+
+        $byTest = [];
+
+        if ($this->tableExists('aptitude_attempts')) {
+            $sql = "SELECT attempt_id, test_id, score, total_marks, percentage, duration_seconds, start_time, end_time
+                    FROM aptitude_attempts
+                    WHERE user_id = :user_id";
+            if ($this->columnExists('aptitude_attempts', 'status')) {
+                $sql .= " AND status = 'completed'";
+            }
+            $sql .= $this->columnExists('aptitude_attempts', 'end_time')
+                ? " ORDER BY end_time DESC, attempt_id DESC"
+                : " ORDER BY start_time DESC, attempt_id DESC";
+
+            $rows = $this->db->fetchAll($sql, ['user_id' => $userId]);
+            foreach ($rows as $row) {
+                $testId = (int)($row['test_id'] ?? 0);
+                if ($testId <= 0 || isset($byTest[$testId])) {
+                    continue;
+                }
+                $byTest[$testId] = $row;
+            }
+
+            return $byTest;
+        }
+
+        if ($this->tableExists('test_attempts')) {
+            $rows = $this->db->fetchAll(
+                "SELECT attempt_id, test_id, score, total_questions, percentage, time_taken, attempted_at
+                 FROM test_attempts
+                 WHERE user_id = :user_id
+                 ORDER BY attempted_at DESC, attempt_id DESC",
+                ['user_id' => $userId]
+            );
+            foreach ($rows as $row) {
+                $testId = (int)($row['test_id'] ?? 0);
+                if ($testId <= 0 || isset($byTest[$testId])) {
+                    continue;
+                }
+                $row['total_marks'] = $row['total_questions'] ?? null;
+                $row['duration_seconds'] = isset($row['time_taken']) ? ((int)$row['time_taken'] * 60) : null;
+                $byTest[$testId] = $row;
+            }
+        }
+
+        return $byTest;
+    }
+
     public function getCategories() {
         if ($this->tableExists('aptitude_categories')) {
             return $this->db->fetchAll(

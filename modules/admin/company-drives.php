@@ -39,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = ['success' => false, 'message' => 'Invalid action.'];
         $redirectCompanyId = (int)($_POST['company_id'] ?? $companyId);
         $redirectDriveId = (int)($_POST['drive_id'] ?? $manageDriveId);
+        $redirectAnchor = '';
 
         if ($action === 'save_drive') {
             $driveId = (int)($_POST['drive_id'] ?? 0);
@@ -59,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $driveId = (int)($_POST['drive_id'] ?? 0);
             $result = $portal->generateInterviewCalls($driveId);
             $redirectDriveId = $driveId;
+            $redirectAnchor = 'interview-calls';
         } elseif ($action === 'update_call_status') {
             $callId = (int)($_POST['call_id'] ?? 0);
             $result = $portal->updateInterviewCallStatus(
@@ -66,6 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_POST['status'] ?? '',
                 $_POST['remarks'] ?? ''
             );
+            $redirectAnchor = 'interview-calls';
         } elseif ($action === 'add_question') {
             $targetCompanyId = (int)($_POST['company_id'] ?? 0);
             $result = $portal->addCompanyQuestion($targetCompanyId, $_POST);
@@ -89,7 +92,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $key = $result['success'] ? 'msg' : 'err';
-        header('Location: ' . $buildRedirect($redirectCompanyId, $redirectDriveId, $key, (string)($result['message'] ?? '')));
+        $location = $buildRedirect($redirectCompanyId, $redirectDriveId, $key, (string)($result['message'] ?? ''));
+        if ($redirectAnchor !== '') {
+            $location .= '#' . $redirectAnchor;
+        }
+        header('Location: ' . $location);
         exit();
     }
 }
@@ -165,6 +172,23 @@ $statusBadgeClass = static function ($status) {
     }
     return 'status-pending';
 };
+
+$allowedCallStatuses = static function ($currentStatus) {
+    $currentStatus = strtolower((string)$currentStatus);
+    $allowedNext = match ($currentStatus) {
+        'pending' => ['invited', 'waitlisted', 'rejected'],
+        'waitlisted' => ['invited', 'selected', 'rejected'],
+        'invited' => ['selected', 'rejected'],
+        'selected' => [],
+        'rejected' => [],
+        default => []
+    };
+
+    return [
+        'current' => $currentStatus !== '' ? $currentStatus : 'pending',
+        'next' => $allowedNext
+    ];
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -237,7 +261,8 @@ $statusBadgeClass = static function ($status) {
         .check-item { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 6px; }
         .check-item:hover { background: #1a1a1a; }
         .check-item input { width: auto; }
-        table { width: 100%; border-collapse: collapse; }
+        .table-wrap { overflow: auto; border: 1px solid #2a2a2a; border-radius: 12px; background: #0f0f0f; }
+        table { width: 100%; border-collapse: collapse; min-width: 860px; }
         th, td { border-top: 1px solid #2a2a2a; padding: 10px; text-align: left; font-size: 0.9rem; vertical-align: top; }
         thead th { color: #a1a1aa; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.35px; background: #101010; }
         .status-pill { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 4px 10px; border: 1px solid transparent; }
@@ -246,6 +271,12 @@ $statusBadgeClass = static function ($status) {
         .status-selected { color: #10b981; border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.12); }
         .status-waitlisted { color: #60a5fa; border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.12); }
         .status-rejected { color: #f87171; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.12); }
+
+        .call-form { display: grid; grid-template-columns: 140px 1fr auto; gap: 10px; align-items: center; }
+        .call-form input[type="text"] { width: 100%; }
+        .call-save { white-space: nowrap; }
+        .call-save.unsaved { border-color: rgba(251,191,36,0.45); box-shadow: 0 0 0 2px rgba(251,191,36,0.12) inset; }
+        .muted-small { color: #9ca3af; font-size: 0.82rem; }
         @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
         @media (max-width: 760px) { .row { grid-template-columns: 1fr; } .nav-menu { display: none; } }
     </style>
@@ -461,55 +492,72 @@ $statusBadgeClass = static function ($status) {
                         <?php endif; ?>
                     </div>
 
-                    <div class="card">
+                    <div class="card" id="interview-calls">
                         <h2>Interview Calls</h2>
                         <?php if (empty($driveCalls)): ?>
                             <div class="muted">No call records yet. Click "Generate Interview Calls" after mapping and cutoffs are configured.</div>
                         <?php else: ?>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Student</th>
-                                        <th>Coding Solved</th>
-                                        <th>Aptitude %</th>
-                                        <th>Total Score</th>
-                                        <th>Status</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($driveCalls as $call): ?>
+                            <div class="muted-small" style="margin-bottom:10px;">
+                                Tip: change action/remarks then click Save. After saving, the page returns here.
+                            </div>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
                                         <tr>
-                                            <td>
-                                                <div style="font-weight:600;"><?php echo htmlspecialchars($call['full_name']); ?></div>
-                                                <div class="muted"><?php echo htmlspecialchars($call['email']); ?></div>
-                                            </td>
-                                            <td><?php echo (int)$call['coding_solved']; ?></td>
-                                            <td><?php echo number_format((float)$call['aptitude_percentage'], 2); ?></td>
-                                            <td><?php echo number_format((float)$call['total_score'], 2); ?></td>
-                                            <td><span class="status-pill <?php echo $statusBadgeClass($call['status']); ?>"><?php echo htmlspecialchars(ucfirst((string)$call['status'])); ?></span></td>
-                                            <td>
-                                                <form method="POST" style="display:flex;gap:8px;flex-wrap:wrap;">
-                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::getCsrfToken()); ?>">
-                                                    <input type="hidden" name="action" value="update_call_status">
-                                                    <input type="hidden" name="company_id" value="<?php echo (int)$companyId; ?>">
-                                                    <input type="hidden" name="drive_id" value="<?php echo (int)$selectedDrive['drive_id']; ?>">
-                                                    <input type="hidden" name="call_id" value="<?php echo (int)$call['call_id']; ?>">
-                                                    <select name="status" style="min-width:128px;">
-                                                        <?php foreach (['pending', 'invited', 'waitlisted', 'selected', 'rejected'] as $status): ?>
-                                                            <option value="<?php echo $status; ?>" <?php echo strtolower((string)$call['status']) === $status ? 'selected' : ''; ?>>
-                                                                <?php echo ucfirst($status); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    </select>
-                                                    <input type="text" name="remarks" placeholder="Remarks" value="<?php echo htmlspecialchars((string)($call['remarks'] ?? '')); ?>">
-                                                    <button class="btn" type="submit">Save</button>
-                                                </form>
-                                            </td>
+                                            <th>Student</th>
+                                            <th>Coding Solved</th>
+                                            <th>Aptitude %</th>
+                                            <th>Total Score</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
                                         </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($driveCalls as $call): ?>
+                                            <?php $callId = (int)$call['call_id']; ?>
+                                            <?php
+                                            $statusInfo = $allowedCallStatuses($call['status'] ?? 'pending');
+                                            $currentStatus = (string)$statusInfo['current'];
+                                            $allowedOptions = array_values(array_unique(array_merge([$currentStatus], (array)$statusInfo['next'])));
+                                            $isFinal = empty($statusInfo['next']);
+                                            ?>
+                                            <tr data-call-id="<?php echo $callId; ?>">
+                                                <td>
+                                                    <div style="font-weight:600;"><?php echo htmlspecialchars($call['full_name']); ?></div>
+                                                    <div class="muted"><?php echo htmlspecialchars($call['email']); ?></div>
+                                                </td>
+                                                <td><?php echo (int)$call['coding_solved']; ?></td>
+                                                <td><?php echo number_format((float)$call['aptitude_percentage'], 2); ?></td>
+                                                <td><?php echo number_format((float)$call['total_score'], 2); ?></td>
+                                                <td>
+                                                    <span class="status-pill <?php echo $statusBadgeClass($call['status']); ?>" data-pill>
+                                                        <?php echo htmlspecialchars(ucfirst((string)$call['status'])); ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <form method="POST" class="call-form" data-call-form>
+                                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::getCsrfToken()); ?>">
+                                                        <input type="hidden" name="action" value="update_call_status">
+                                                        <input type="hidden" name="company_id" value="<?php echo (int)$companyId; ?>">
+                                                        <input type="hidden" name="drive_id" value="<?php echo (int)$selectedDrive['drive_id']; ?>">
+                                                        <input type="hidden" name="call_id" value="<?php echo $callId; ?>">
+                                                        <select name="status" data-status <?php echo $isFinal ? 'disabled' : ''; ?>>
+                                                            <?php foreach (['pending', 'invited', 'waitlisted', 'selected', 'rejected'] as $status): ?>
+                                                                <?php $disabled = !in_array($status, $allowedOptions, true); ?>
+                                                                <option value="<?php echo $status; ?>" <?php echo strtolower((string)$call['status']) === $status ? 'selected' : ''; ?> <?php echo $disabled ? 'disabled' : ''; ?>>
+                                                                    <?php echo ucfirst($status); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                        <input type="text" name="remarks" placeholder="<?php echo $isFinal ? 'Final status' : 'Remarks'; ?>" value="<?php echo htmlspecialchars((string)($call['remarks'] ?? '')); ?>" data-remarks <?php echo $isFinal ? 'readonly' : ''; ?>>
+                                                        <button class="btn call-save" type="submit" data-save <?php echo $isFinal ? 'disabled' : ''; ?>>Save</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
@@ -774,6 +822,56 @@ $statusBadgeClass = static function ($status) {
 
             startDateInput.addEventListener('change', syncDateBounds);
             syncDateBounds();
+        }());
+    </script>
+    <script>
+        (function initInterviewCallUX() {
+            const statusToClass = {
+                pending: 'status-pending',
+                invited: 'status-invited',
+                waitlisted: 'status-waitlisted',
+                selected: 'status-selected',
+                rejected: 'status-rejected'
+            };
+
+            function titleCase(s) {
+                s = String(s || '').trim();
+                return s ? (s.charAt(0).toUpperCase() + s.slice(1)) : s;
+            }
+
+            document.querySelectorAll('form[data-call-form]').forEach((form) => {
+                const row = form.closest('tr');
+                const pill = row ? row.querySelector('[data-pill]') : null;
+                const statusSelect = form.querySelector('[data-status]');
+                const remarks = form.querySelector('[data-remarks]');
+                const saveBtn = form.querySelector('[data-save]');
+
+                if (!row || !pill || !statusSelect || !saveBtn) return;
+
+                const originalStatus = String(statusSelect.value || '').toLowerCase();
+                const originalRemarks = remarks ? String(remarks.value || '') : '';
+
+                function markUnsavedIfChanged() {
+                    const currentStatus = String(statusSelect.value || '').toLowerCase();
+                    const currentRemarks = remarks ? String(remarks.value || '') : '';
+                    const changed = currentStatus !== originalStatus || currentRemarks !== originalRemarks;
+                    saveBtn.classList.toggle('unsaved', changed);
+                }
+
+                statusSelect.addEventListener('change', () => {
+                    const s = String(statusSelect.value || '').toLowerCase();
+                    pill.textContent = titleCase(s);
+                    pill.classList.remove(...Object.values(statusToClass));
+                    if (statusToClass[s]) {
+                        pill.classList.add(statusToClass[s]);
+                    }
+                    markUnsavedIfChanged();
+                });
+
+                if (remarks) {
+                    remarks.addEventListener('input', markUnsavedIfChanged);
+                }
+            });
         }());
     </script>
 </body>

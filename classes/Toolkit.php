@@ -5,6 +5,7 @@ require_once __DIR__ . '/Database.php';
 class Toolkit {
     private $db;
     private $uploadDir;
+    private $documentsTable = 'user_documents';
     
     public function __construct() {
         $this->db = Database::getInstance();
@@ -13,6 +14,52 @@ class Toolkit {
         // Create upload directory if it doesn't exist
         if (!file_exists($this->uploadDir)) {
             mkdir($this->uploadDir, 0755, true);
+        }
+
+        $this->ensureDocumentsStorage();
+    }
+
+    private function ensureDocumentsStorage(): void {
+        if ($this->db->tableExists($this->documentsTable)) {
+            return;
+        }
+
+        // The repo ships multiple SQL snapshots; some create `documents` instead of `user_documents`.
+        // The UI/module expects `user_documents`, so create it if missing to avoid fatal errors.
+        try {
+            $this->db->query(
+                "CREATE TABLE IF NOT EXISTS `user_documents` (
+                    `document_id` INT PRIMARY KEY AUTO_INCREMENT,
+                    `user_id` INT NOT NULL,
+                    `file_name` VARCHAR(255) NOT NULL,
+                    `file_path` VARCHAR(500) NOT NULL,
+                    `file_size` INT NOT NULL DEFAULT 0,
+                    `category` VARCHAR(50) NOT NULL DEFAULT 'other',
+                    `description` TEXT NULL,
+                    `uploaded_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_user` (`user_id`),
+                    CONSTRAINT `fk_user_documents_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+        } catch (Exception $e) {
+            // If FK creation fails (engine mismatch / privileges), fall back to a simpler table.
+            try {
+                $this->db->query(
+                    "CREATE TABLE IF NOT EXISTS `user_documents` (
+                        `document_id` INT PRIMARY KEY AUTO_INCREMENT,
+                        `user_id` INT NOT NULL,
+                        `file_name` VARCHAR(255) NOT NULL,
+                        `file_path` VARCHAR(500) NOT NULL,
+                        `file_size` INT NOT NULL DEFAULT 0,
+                        `category` VARCHAR(50) NOT NULL DEFAULT 'other',
+                        `description` TEXT NULL,
+                        `uploaded_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX `idx_user` (`user_id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                );
+            } catch (Exception $ignored) {
+                // Leave missing; methods will degrade gracefully.
+            }
         }
     }
     
@@ -90,6 +137,10 @@ class Toolkit {
      */
     public function uploadDocument($userId, $file, $category, $description = '') {
         try {
+            if (!$this->db->tableExists($this->documentsTable)) {
+                return ['success' => false, 'message' => 'Document storage table is missing. Import database schema or run migrations.'];
+            }
+
             $allowedTypes = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
             $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
             
@@ -103,7 +154,7 @@ class Toolkit {
             
             if (move_uploaded_file($file['tmp_name'], $filePath)) {
                 // Save to database
-                $query = "INSERT INTO user_documents 
+                $query = "INSERT INTO {$this->documentsTable} 
                           (user_id, file_name, file_path, file_size, category, description, uploaded_at)
                           VALUES (:user_id, :file_name, :file_path, :file_size, :category, :description, NOW())";
                 
@@ -129,6 +180,10 @@ class Toolkit {
      * Get user documents
      */
     public function getUserDocuments($userId, $category = null) {
+        if (!$this->db->tableExists($this->documentsTable)) {
+            return [];
+        }
+
         $whereClause = "WHERE user_id = :user_id";
         $params = ['user_id' => $userId];
         
@@ -137,7 +192,7 @@ class Toolkit {
             $params['category'] = $category;
         }
         
-        $query = "SELECT * FROM user_documents $whereClause ORDER BY uploaded_at DESC";
+        $query = "SELECT * FROM {$this->documentsTable} $whereClause ORDER BY uploaded_at DESC";
         return $this->db->fetchAll($query, $params);
     }
     
@@ -146,9 +201,13 @@ class Toolkit {
      */
     public function deleteDocument($documentId, $userId) {
         try {
+            if (!$this->db->tableExists($this->documentsTable)) {
+                return ['success' => false, 'message' => 'Document storage table is missing.'];
+            }
+
             // Get file info
             $doc = $this->db->fetchOne(
-                "SELECT file_path FROM user_documents WHERE document_id = :doc_id AND user_id = :user_id",
+                "SELECT file_path FROM {$this->documentsTable} WHERE document_id = :doc_id AND user_id = :user_id",
                 ['doc_id' => $documentId, 'user_id' => $userId]
             );
             
@@ -160,7 +219,7 @@ class Toolkit {
                 }
                 
                 // Delete from database
-                $this->db->delete('user_documents', 'document_id = :doc_id', ['doc_id' => $documentId]);
+                $this->db->delete($this->documentsTable, 'document_id = :doc_id', ['doc_id' => $documentId]);
                 
                 return ['success' => true, 'message' => 'Document deleted successfully'];
             }
@@ -175,6 +234,16 @@ class Toolkit {
      * Get document stats
      */
     public function getDocumentStats($userId) {
+        if (!$this->db->tableExists($this->documentsTable)) {
+            return [
+                'total' => 0,
+                'resumes' => 0,
+                'certificates' => 0,
+                'others' => 0,
+                'total_size' => 0
+            ];
+        }
+
         return $this->db->fetchOne(
             "SELECT 
                 COUNT(*) as total,
@@ -182,7 +251,7 @@ class Toolkit {
                 SUM(CASE WHEN category = 'certificate' THEN 1 ELSE 0 END) as certificates,
                 SUM(CASE WHEN category = 'other' THEN 1 ELSE 0 END) as others,
                 SUM(file_size) as total_size
-             FROM user_documents
+             FROM {$this->documentsTable}
              WHERE user_id = :user_id",
             ['user_id' => $userId]
         );

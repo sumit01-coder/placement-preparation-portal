@@ -86,6 +86,22 @@ $additionalCSS = '
 .badge.ok { color: #22c55e; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.12); }
 .badge.warn { color: #fbbf24; border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.12); }
 .badge.bad { color: #f87171; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.12); }
+.drive-actions { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.btn-letter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid rgba(255, 161, 22, 0.35);
+    background: rgba(255, 161, 22, 0.12);
+    color: #fff;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+.btn-letter:hover { background: rgba(255, 161, 22, 0.18); border-color: rgba(255, 161, 22, 0.5); transform: translateY(-1px); }
 .meta { color: #9ca3af; font-size: 0.88rem; line-height: 1.45; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .stat { background: #0d0d0d; border: 1px solid #262626; border-radius: 8px; padding: 10px; }
@@ -165,7 +181,14 @@ include __DIR__ . '/../../includes/navbar.php';
                                 <?php echo htmlspecialchars((string)($drive['description'] ?? '')); ?>
                             </div>
                         </div>
-                        <span class="badge <?php echo $statusClass($status); ?>"><?php echo htmlspecialchars($callLabel($status)); ?></span>
+                        <div class="drive-actions">
+                            <?php if (in_array(strtolower($status), ['invited', 'selected'], true)): ?>
+                                <a class="btn-letter" href="interview-letter.php?drive_id=<?php echo (int)$drive['drive_id']; ?>">
+                                    Interview Letter
+                                </a>
+                            <?php endif; ?>
+                            <span class="badge <?php echo $statusClass($status); ?>"><?php echo htmlspecialchars($callLabel($status)); ?></span>
+                        </div>
                     </div>
                     <div class="meta">
                         Drive window: <?php echo htmlspecialchars((string)($drive['start_date'] ?? 'Open')); ?> to <?php echo htmlspecialchars((string)($drive['end_date'] ?? 'Open')); ?>
